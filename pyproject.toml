@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baqcs"
+version = "0.0.1"
+description = "Bayesian Analysis for Quantum Circuit Synthesis"
+readme = "README.rst"
+dependencies = [
+  "pyro-ppl",
+  "qiskit",
+  "qiskit_aer",
+]
+authors = [
+  {name = "Wim Lavrijsen", email = "WLavrijsen@lbl.gov"},
+]
+maintainers = [
+  {name = "Wim Lavrijsen", email = "WLavrijsen@lbl.gov"},
+]
+keywords = [
+  "quantum computing",
+]
+license = "BSD-3-Clause-LBNL"
+dynamic = ["classifiers"]

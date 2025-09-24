@@ -1,0 +1,25 @@
+# python compiled files
+*.pyc
+*.pyo
+
+.cache
+.pytest_cache
+
+# distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# notebook products
+.ipynb_checkpoints
