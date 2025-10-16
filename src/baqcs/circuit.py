@@ -27,12 +27,16 @@ def decompose(circuit: QuantumCircuit) -> Tuple[QuantumCircuit]:
 
     for instr in circuit.data:
         if isinstance(instr.operation, IfElseOp):
-          # TODO: AFAICT, it can not actually be derived from the instruction
-          # what the comparison is against and hence which branch is what, so
-          # simply hard-wire the branch collection here
-            zero_circuit = instr.operation.params[1].copy()
-            one_circuit  = instr.operation.params[0].copy()
-            break
+          # TODO: the following may be too simplistic, but it's all we're using atm.
+            assert instr.operation.condition[1] in (0, 1)
+            if instr.operation.condition[1] == 0:     # zero is True branch
+                iZ = 0; iO = 1
+            else:                                     # one is True branch
+                iZ = 1; iO = 0
+
+            branches = instr.operation.params
+            zero_circuit = branches[iZ] and branches[iZ].copy() or None
+            one_circuit  = branches[iO] and branches[iO].copy() or None
 
         for qubit in instr.qubits:
             index = qubits.index(qubit)
