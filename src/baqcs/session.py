@@ -1,3 +1,4 @@
+import collections.abc
 import numpy as np
 import torch
 import pyro
@@ -11,7 +12,7 @@ import torch.nn.functional as F
 
 from qiskit.quantum_info import Statevector
 
-from typing import List
+from typing import Dict, List
 
 
 class Session:
@@ -24,7 +25,7 @@ class Session:
       # memoization for performance
         self.estimate_p_cache = dict()
 
-    def _encode_data(self, counts: List[str]) -> torch.tensor:
+    def _encode_data(self, counts: Dict[str, int]) -> torch.tensor:
         """Experimental data (IBM format) to model encoding"""
 
         meas = []
@@ -33,17 +34,17 @@ class Session:
 
           # measurements are encoded as: 00->0, 01->1, 10->2, 11->3 etc.
             m = int(bits, 2)
-            system_meas.extend([m] * count)
+            meas.extend([m] * count)
 
-        # randomize the data order (as given it's sorted as it came from
-        # the histogram, but actual measurements will have been random)
-        data = torch.tensor(system_meas)
+      # randomize the data order (as given it's sorted as it came from the
+      # histogram, but actual measurements will have been random)
+        data = torch.tensor(meas)
         indexes = torch.randperm(data.shape[0])
         observations = data[indexes]
 
         return observations
 
-    def estimate_p_single(self, outcome, initial, branches, system_qubits, ancilla_qubits):
+    def estimate_p_single(self, outcome, initial, branches):
         """
         Estimate measurement probabilities for system qubits given ancilla
         measurement outcome. This implementation uses the full circuit info.
@@ -52,8 +53,6 @@ class Session:
             outcome: 0 or 1 - the measured ancilla value
             initial: QuantumCircuit with operations before ancilla measurement
             branches: Tuple of QuantumCircuit branches indexed with ancilla measurement
-            system_qubits: List of indices for system qubits
-            ancilla_qubits: List of indices for ancilla qubits
 
         Returns:
             torch.Tensor: Probability table P(system|ancilla)
@@ -80,12 +79,12 @@ class Session:
 
         probs = Statevector.from_instruction(branched_circuit).probabilities()
 
-        n_system = len(system_qubits)
+        n_system = len(branched_circuit.qubits)
         system_dim = 2**n_system
 
       # for single ancilla qubit, create mask to check if it matches outcome
-        assert len(ancilla_qubits) == 1
-        ancilla_qubit = ancilla_qubits[0]  # Assumes single ancilla
+        assert len(branched_circuit.ancillas) == 1
+        ancilla_qubit = n_system  # assumes single ancilla following system qubits
 
       # iterate over all possible states to marginalize the system probabilites
         system_probs = torch.zeros(system_dim)
@@ -94,9 +93,9 @@ class Session:
           # add probabilities if ancilla matches the measurement outcome
             ancilla_bit = (state_idx >> ancilla_qubit) & 1
             if ancilla_bit == outcome:
-              # extract system state index using actual qubit positions
+              # extract system state index (assumes system qubits come first)
                 system_idx = 0
-                for q in system_qubits:
+                for q in range(n_system):
                     bit = (state_idx >> q) & 1
                     system_idx += bit * 2**q
 
@@ -112,7 +111,7 @@ class Session:
         return system_probs
 
 
-    def estimate_p(self, outcome, initial, branches, system_qubits, ancilla_qubits):
+    def estimate_p(self, outcome, initial, branches):
         """
         Compute measurement probabilities, handling both single values and
         enumerated tensors.
@@ -120,29 +119,29 @@ class Session:
         See estimate_p_single for detailed description of the arguments.
         """
 
-      # special case if outcome is a tensor from enumeration
-        if torch.is_tensor(outcome) and outcome.dim() > 0:
+      # multiple outcomes requested?
+        if torch.is_tensor(outcome) and outcome.dim() > 0 or \
+                isinstance(outcome, collections.abc.Iterable):
           # compute the probabilities for each enumerated value
             all_probs = torch.stack([
-                self.estimate_p_single(o, initial, branches, system_qubits, ancilla_qubits)
-                for o in outcome
+                self.estimate_p_single(int(o), initial, branches) for o in outcome
             ])
 
             return all_probs
 
-      # else single value
+      # single value case
         return self.estimate_p_single(int(outcome), initial, branches, system_qubits, ancilla_qubits)
 
     def svi(self, sys_qubits, model, guide, observations, nsteps = 100, seed: int | None = None):
-        # setup SVI, using an Adam optimizer with momentum and use more particles
-        # to improve gradient estimates (TODO: picked a large number b/c it worked,
-        # but it's obviously very slow; need tuning)
+      # setup SVI, using an Adam optimizer with momentum and use more particles
+      # to improve gradient estimates (TODO: picked a large number b/c it worked,
+      # but it's obviously very slow; need tuning)
         pyro.clear_param_store()
         self.estimate_p_cache.clear()
 
         Ns = len(sys_qubits)
 
-        # optional: fixed seeds for reproducibility
+      # optional: fixed seeds for reproducibility
         if seed is not None:
             pyro.set_rng_seed(seed)
             np.random.seed(42)
@@ -151,7 +150,7 @@ class Session:
         elbo = TraceEnum_ELBO(max_plate_nesting=1, num_particles=50)
         svi = SVI(model, guide, optimizer, loss=elbo)
 
-        # training
+      # training
         losses = []
         param_history = []
 
@@ -169,7 +168,7 @@ class Session:
                 print(f"Step {step:4d}, Loss: {loss:8.4f}, "
                       f"P(ancilla=1): {probs[1]:.4f}")
 
-        # store and report final result
+      # store and report final result
         final_logits = pyro.param("ancilla_logits").detach()
         final_probs = F.softmax(final_logits, dim=0)
 
@@ -181,7 +180,7 @@ class Session:
         """
 
         if not isinstance(observations, torch.Tensor):
-            observations = torch.tensor(observations, dtype=torch.long)
+            observations = self._encode_data(observations)
 
         nuts_kernel = NUTS(model)
         mcmc = MCMC(nuts_kernel, num_samples=num_samples, warmup_steps=warmup_steps)
