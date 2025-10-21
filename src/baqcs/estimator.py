@@ -38,24 +38,18 @@ class Estimator:
         n_system = len(branched_circuit.qubits) - len(branched_circuit.ancillas)
         system_dim = 2**n_system
 
-      # for single ancilla qubit, create mask to check if it matches outcome
-        assert len(branched_circuit.ancillas) == 1
-        ancilla_qubit = n_system  # assumes single ancilla following system qubits
-
       # iterate over all possible states to marginalize the system probabilites
         system_probs = torch.zeros(system_dim)
 
         for state_idx, prob in enumerate(probs):
-          # add probabilities if ancilla matches the measurement outcome
-            ancilla_bit = (state_idx >> ancilla_qubit) & 1
-            if ancilla_bit == outcome:
-              # extract system state index (assumes system qubits come first)
-                system_idx = 0
-                for q in range(n_system):
-                    bit = (state_idx >> q) & 1
-                    system_idx += bit * 2**q
+          # add probabilities (ancilla matches by definition b/c of the chosen
+          # branch); system state index assumes system qubits come first
+            system_idx = 0
+            for q in range(n_system):
+                bit = (state_idx >> q) & 1
+                system_idx += bit * 2**q
 
-                system_probs[system_idx] += prob
+            system_probs[system_idx] += prob
 
         return system_probs
 
