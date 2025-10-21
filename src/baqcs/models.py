@@ -68,9 +68,9 @@ def binomial_ancilla_model(observed_system_data, cpt):
         # Get the conditional probabilities for this ancilla state
         # Convert to long tensor for indexing
         ancilla_long = ancilla.long()
-        probs = torch.tensor(cpt[ancilla_long, :], dtype=torch.float32)
+        probs = cpt[ancilla_long, :]
 
         # Observe system measurement given ancilla state
-        pyro.sample("system", Categorical(probs), 
-                   obs=torch.tensor(observed_system_data, dtype=torch.long))
+        pyro.sample("system", Categorical(probs),
+                    obs=observed_system_data)
 
