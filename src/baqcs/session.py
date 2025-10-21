@@ -3,14 +3,14 @@ import numpy as np
 import torch
 import pyro
 
+from .estimator import Estimator
+
 from pyro.optim import Adam
 from pyro.infer import (
     SVI, TraceEnum_ELBO,
     MCMC, NUTS,
 )
 import torch.nn.functional as F
-
-from qiskit.quantum_info import Statevector
 
 from typing import Dict, List
 
@@ -23,6 +23,7 @@ class Session:
         pyro.clear_param_store()
 
       # memoization for performance
+        self.estimator = Estimator()
         self.estimate_p_cache = dict()
 
     def _encode_data(self, counts: Dict[str, int]) -> torch.tensor:
@@ -44,7 +45,7 @@ class Session:
 
         return observations
 
-    def estimate_p_single(self, outcome, initial, branches):
+    def _estimate_p_single(self, outcome, initial, branches):
         """
         Estimate measurement probabilities for system qubits given ancilla
         measurement outcome. This implementation uses the full circuit info.
@@ -63,43 +64,7 @@ class Session:
         except KeyError:
             pass
 
-      # get the state after initial operations from the initial plus
-      # chosen branch based on the ancilla measuement to calculate the
-      # expected system qubits out comes
-      #  TODO:
-      #     - get the projection from calculated probabilities only
-      #     - allow inclusion of error estimates
-      #     - export information to use as a building block
-
-      # construct full circuit with the branch taken based on ancilla
-      # measurement outcome
-        branched_circuit = initial.copy()
-        branch = branches[0] if outcome == 0 else branches[1]
-        branched_circuit.compose(branch, inplace=True)
-
-        probs = Statevector.from_instruction(branched_circuit).probabilities()
-
-        n_system = len(branched_circuit.qubits)
-        system_dim = 2**n_system
-
-      # for single ancilla qubit, create mask to check if it matches outcome
-        assert len(branched_circuit.ancillas) == 1
-        ancilla_qubit = n_system  # assumes single ancilla following system qubits
-
-      # iterate over all possible states to marginalize the system probabilites
-        system_probs = torch.zeros(system_dim)
-
-        for state_idx, prob in enumerate(probs):
-          # add probabilities if ancilla matches the measurement outcome
-            ancilla_bit = (state_idx >> ancilla_qubit) & 1
-            if ancilla_bit == outcome:
-              # extract system state index (assumes system qubits come first)
-                system_idx = 0
-                for q in range(n_system):
-                    bit = (state_idx >> q) & 1
-                    system_idx += bit * 2**q
-
-                system_probs[system_idx] += prob
+        system_probs = self.estimator.estimate_p_single(outcome, initial, branches)
 
       # normalize (since probabilities were post-selected) after adding
       # a small fudge to help with numerical stability in case noisy
@@ -109,7 +74,6 @@ class Session:
 
         self.estimate_p_cache[outcome] = system_probs
         return system_probs
-
 
     def estimate_p(self, outcome, initial, branches):
         """
@@ -124,13 +88,13 @@ class Session:
                 isinstance(outcome, collections.abc.Iterable):
           # compute the probabilities for each enumerated value
             all_probs = torch.stack([
-                self.estimate_p_single(int(o), initial, branches) for o in outcome
+                self._estimate_p_single(int(o), initial, branches) for o in outcome
             ])
 
             return all_probs
 
       # single value case
-        return self.estimate_p_single(int(outcome), initial, branches, system_qubits, ancilla_qubits)
+        return self._estimate_p_single(int(outcome), initial, branches)
 
     def svi(self, sys_qubits, model, guide, observations, nsteps = 100, seed: int | None = None):
       # setup SVI, using an Adam optimizer with momentum and use more particles
