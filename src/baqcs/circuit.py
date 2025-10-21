@@ -1,4 +1,7 @@
-from qiskit.circuit import QuantumCircuit, CircuitInstruction
+from qiskit.circuit import (
+    QuantumCircuit, CircuitInstruction,
+    QuantumRegister, AncillaRegister, ClassicalRegister
+)
 from qiskit.circuit.controlflow import IfElseOp
 
 from typing import Tuple
@@ -20,11 +23,16 @@ def decompose(circuit: QuantumCircuit) -> Tuple[QuantumCircuit]:
       tuple of base, zero-branch, and one-branch circuits
     """
 
+    # copy base circuit while retaining original system/ancilla layout
+    base_circuit = QuantumCircuit(*(
+        type(r)(len(r), r.name) for r in (circuit.qregs+circuit.cregs)
+    ))
+
+    # retain indexing of operations through lookup on the original
     qubits = circuit.qubits
     clbits = circuit.clbits
 
-    base_circuit = QuantumCircuit(circuit.num_qubits, circuit.num_clbits)
-
+    # copy individual circuit operations
     for instr in circuit.data:
         if isinstance(instr.operation, IfElseOp):
           # TODO: the following may be too simplistic, but it's all we're using atm.
@@ -38,8 +46,7 @@ def decompose(circuit: QuantumCircuit) -> Tuple[QuantumCircuit]:
             zero_circuit = branches[iZ] and branches[iZ].copy() or None
             one_circuit  = branches[iO] and branches[iO].copy() or None
 
-        for qubit in instr.qubits:
-            index = qubits.index(qubit)
+            break       # TODO: this simplifying assumption may not be met
 
         if instr.operation.name != "measure":
             base_circuit.append(CircuitInstruction(
