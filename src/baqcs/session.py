@@ -110,6 +110,10 @@ class Session:
             pyro.set_rng_seed(seed)
             np.random.seed(42)
 
+      # reformat observation as needed
+        if not isinstance(observations, torch.Tensor):
+            observations = self._encode_data(observations)
+
         optimizer = pyro.optim.Adam({"lr": 0.01, "betas": (0.95, 0.999)})
         elbo = TraceEnum_ELBO(max_plate_nesting=1, num_particles=50)
         svi = SVI(model, guide, optimizer, loss=elbo)
